@@ -20,28 +20,25 @@ function Get-ScimOAuthToken {
 
         [Parameter(Mandatory)]
         [string]
-        $UserName,
-
-        [Parameter(Mandatory)]
-        [string]
-        $Password,
-
-        [Parameter(Mandatory)]
-        [string]
-        $AuthenticationUri
+        $baseUrl
     )
 
     try {
         Write-Information "Invoking command '$($MyInvocation.MyCommand)'"
-        $headers = @{
-            "content-type" = "application/x-www-form-urlencoded"
-        }
 
         $splatParams = @{
-            Uri     = "$($AuthenticationUri)?grant_type=password&client_id=$($ClientID)&client_secret=$($ClientSecret)&username=$($UserName)&password=$($Password)"
+            Uri     = "$($baseUrl)/services/oauth2/token"
             Method  = 'POST'
-            Headers = $Headers
+            Headers =  @{
+                "content-type" = "application/x-www-form-urlencoded"
+            }
+            Body    = @{
+                grant_type      = 'client_credentials'
+                client_id       = $ClientID
+                client_secret   = $ClientSecret
+            }
         }
+
         Invoke-RestMethod @splatParams
         Write-Information 'Finished retrieving accessToken'
     }
@@ -116,22 +113,21 @@ function ConvertTo-HelloIDAccountObject {
 
 try {
     Write-Information 'Starting Salesforce-SCIM account entitlement import'
+
+    Write-Information 'Getting instance url'
+    $instanceUri = $($actionContext.Configuration.BaseUrl).Trim('/')
+
     Write-Information 'Retrieving accessToken'
     $splatTokenParams = @{
         ClientID          = $($actionContext.Configuration.ClientID)
         ClientSecret      = $($actionContext.Configuration.ClientSecret)
-        UserName          = $($actionContext.Configuration.UserName)
-        Password          = $($actionContext.Configuration.Password)
-        AuthenticationUri = $($actionContext.Configuration.AuthenticationUri)
+        BaseUrl           = $instanceUri
     }
     $accessToken = Get-ScimOAuthToken @splatTokenParams
 
     Write-Information 'Adding token to authorization headers'
     $headers = [System.Collections.Generic.Dictionary[[String], [String]]]::new()
     $headers.Add("Authorization", "Bearer $($accessToken.access_token)")
-
-    Write-Information 'Getting instance url'
-    $instanceUri = $($actionContext.Configuration.BaseUrl)
 
     $take = 20
     $startIndex = 0
