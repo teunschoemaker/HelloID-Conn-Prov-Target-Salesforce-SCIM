@@ -130,7 +130,7 @@ try {
     $headers.Add("Authorization", "Bearer $($accessToken.access_token)")
 
     $take = 20
-    $startIndex = 0
+    $startIndex = 1
     do {
         $splatImportAccountParams = @{
             Uri     = "$instanceUri/services/scim/v2/Users?startIndex=$($startIndex)&count=$($take)"
@@ -141,7 +141,6 @@ try {
         $response = Invoke-RestMethod @splatImportAccountParams
 
         $result = $response.Resources
-        $totalResults = $response.totalResults
 
         if ($null -ne $result) {
             foreach ($importedAccount in $result) {
@@ -175,7 +174,7 @@ try {
                 $startIndex++
             }
         }
-    } while (($result.count -gt 0) -and ($startIndex -lt $totalResults))
+    } while ($result.count -gt 0)
     Write-Information 'Salesforce-SCIM account entitlement import completed'
 }
 catch {
