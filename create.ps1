@@ -227,7 +227,7 @@ try {
 
         # Determine if a user needs to be [created] or [correlated]
         Write-Information "Verifying if a Salesforce account exists where $correlationField is: [$correlationValue]"
-        $response = Invoke-ScimRestMethod -InstanceUri $instanceUri -Endpoint "Users?filter=$orrelationField eq ""$($correlationValue)""" -Method 'GET' -headers $headers
+        $response = Invoke-ScimRestMethod -InstanceUri $instanceUri -Endpoint "Users?filter=$correlationField eq ""$($correlationValue)""" -Method 'GET' -headers $headers
         $correlatedAccount = $response.Resources
     }
 
