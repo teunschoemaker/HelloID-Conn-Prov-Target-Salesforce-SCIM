@@ -184,31 +184,12 @@ try {
     Write-Information "Retrieving '$totalResults' entitlements"
     $responseAllEntitlements = Invoke-ScimRestMethod -InstanceUri $instanceUri -Endpoint 'Entitlements' -Method 'GET' -headers $headers -TotalResults $totalResults
 
-    Write-Information 'Getting total number of Roles'
-    $response = Invoke-ScimRestMethod -InstanceUri $instanceUri -Endpoint 'Roles' -Method 'GET' -headers $headers
-    $totalResults = $response.totalResults
-
-    Write-Information "Retrieving '$totalResults' roles"
-    $responseAllRoles = Invoke-ScimRestMethod -InstanceUri $instanceUri -Endpoint 'Roles' -Method 'GET' -headers $headers -TotalResults $totalResults
     foreach ($entitlement in $responseAllEntitlements) {
-
         $outputContext.Permissions.Add(
             @{
                 DisplayName    = $entitlement.displayName
                 Identification = @{
                     Reference = $entitlement.id
-                }
-            }
-        )
-    }
-
-    foreach ($role in $responseAllRoles) {
-
-        $outputContext.Permissions.Add(
-            @{
-                DisplayName    = "Rol: " + $role.displayName
-                Identification = @{
-                    Reference = $role.id
                 }
             }
         )

@@ -1,7 +1,7 @@
-#################################################################
-# HelloID-Conn-Prov-Target-Salesforce-SCIM-UpdatePermission-Group
+################################################################
+# HelloID-Conn-Prov-Target-Salesforce-SCIM-RevokePermission-Role
 # PowerShell V2
-#################################################################
+################################################################
 
 # Enable TLS1.2
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
@@ -44,81 +44,6 @@ function Get-ScimOAuthToken {
     }
     catch {
         $PSCmdlet.ThrowTerminatingError($PSItem)
-    }
-}
-
-function Invoke-ScimRestMethod {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
-        [string]
-        $Method,
-
-        [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
-        [string]
-        $InstanceUri,
-
-        [Parameter(Mandatory)]
-        [ValidateNotNullOrEmpty()]
-        [string]
-        $Endpoint,
-
-        [object]
-        $Body,
-
-        [string]
-        $ContentType = 'application/json',
-
-        [Parameter(Mandatory)]
-        [System.Collections.IDictionary]
-        $Headers,
-
-        [string]
-        $TotalResults
-    )
-
-    try {
-        Write-Information "Invoking command '$($MyInvocation.MyCommand)'"
-        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
-
-        $baseUrl = "$InstanceUri/services/scim/v2"
-        $splatParams = @{
-            Headers     = $Headers
-            Method      = $Method
-            ContentType = $ContentType
-        }
-
-        if ($Body) {
-            Write-Information 'Adding body to request'
-            $splatParams['Body'] = $Body
-        }
-
-        if ($TotalResults) {
-            # Fixed value since each page contains 20 items max
-            $count = 20
-            $startIndex = 1
-            [System.Collections.Generic.List[object]]$dataList = @()
-            Write-Information 'Using pagination to retrieve results'
-            do {
-                $splatParams['Uri'] = "$($baseUrl)/$($Endpoint)?startIndex=$startIndex&count=$count"
-                $result = Invoke-RestMethod @splatParams
-                $null = $startIndex + $count + $count
-                foreach ($resource in $result.Resources) {
-                    $dataList.Add($resource)
-                }
-                $startIndex = $count + $startIndex
-            } until ($dataList.Count -eq $TotalResults)
-            Write-Output $dataList
-        }
-        else {
-            $splatParams['Uri'] = "$baseUrl/$Endpoint"
-            Invoke-RestMethod @splatParams
-        }
-    }
-    catch {
-        $PSCmdlet.ThrowTerminatingError($_)
     }
 }
 
@@ -186,7 +111,6 @@ try {
         $splatGetUserParams = @{
             Uri     = "$instanceUri/services/scim/v2/Users/$($actionContext.References.Account)"
             Headers = $headers
-            Body    = $body
             Method  = 'GET'
         }
         $correlatedAccount = Invoke-RestMethod @splatGetUserParams
@@ -200,32 +124,37 @@ try {
         }
     }
 
-    if ($null -ne $correlatedAccount) {
-        $action = 'UpdatePermission'
+    $permissionReference = $actionContext.References.Permission.Reference
+    $permissionAssigned = $false
+    if ($null -ne $correlatedAccount -and $null -ne $correlatedAccount.roles) {
+        foreach ($role in @($correlatedAccount.roles)) {
+            if ($role.value -eq $permissionReference) {
+                $permissionAssigned = $true
+                break
+            }
+        }
+    }
+
+    if ($null -eq $correlatedAccount) {
+        $action = 'NotFound'
+    }
+    elseif (-not $permissionAssigned) {
+        $action = 'NoChanges'
     }
     else {
-        $action = 'NotFound'
+        $action = 'RevokePermission'
     }
 
     # Process
     switch ($action) {
-        'UpdatePermission' {
+        'RevokePermission' {
             if (-not($actionContext.DryRun -eq $true)) {
-                Write-Information "Updating Salesforce-SCIM permission: [$($actionContext.PermissionDisplayName)] - [$($actionContext.References.Permission.Reference)]"
+                Write-Information "Revoking Salesforce-SCIM permission: [$($actionContext.PermissionDisplayName)] - [$permissionReference]"
                 [System.Collections.Generic.List[object]]$operations = @()
-                [System.Collections.Generic.List[object]]$entitlementList = @()
-                $entitlementList.Add(
-                    [PSCustomObject]@{
-                        value = $($actionContext.References.Permission.Reference)
-                    }
-                )
-
                 $operations.Add(
                     [PSCustomObject]@{
-                        op    = "Replace"
-                        value = [PSCustomObject]@{
-                            entitlements = $entitlementList
-                        }
+                        op   = 'remove'
+                        path = "roles[value eq `"$permissionReference`"]"
                     }
                 )
 
@@ -236,7 +165,6 @@ try {
                     Operations = $operations
                 } | ConvertTo-Json -Depth 10
 
-
                 $splatParams = @{
                     Uri     = "$instanceUri/services/scim/v2/Users/$($actionContext.References.Account)"
                     Headers = $headers
@@ -246,12 +174,22 @@ try {
                 $null = Invoke-RestMethod @splatParams
             }
             else {
-                Write-Information "[DryRun] Update Salesforce-SCIM permission: [$($actionContext.PermissionDisplayName)] - [$($actionContext.References.Permission.Reference)], will be executed during enforcement"
+                Write-Information "[DryRun] Revoke Salesforce-SCIM permission: [$($actionContext.PermissionDisplayName)] - [$permissionReference], will be executed during enforcement"
             }
 
             $outputContext.Success = $true
             $outputContext.AuditLogs.Add([PSCustomObject]@{
-                    Message = "Update permission [$($actionContext.PermissionDisplayName)] was successful"
+                    Message = "Revoke permission: [$($actionContext.PermissionDisplayName)] from [$($actionContext.References.Account)] was successful"
+                    IsError = $false
+                })
+            break
+        }
+
+        'NoChanges' {
+            Write-Information "Permission: [$($actionContext.PermissionDisplayName)] is already absent from Salesforce-SCIM account: [$($actionContext.References.Account)]"
+            $outputContext.Success = $true
+            $outputContext.AuditLogs.Add([PSCustomObject]@{
+                    Message = "Skipped revoking permission: [$($actionContext.PermissionDisplayName)] from [$($actionContext.References.Account)]. Reason: Permission is already absent."
                     IsError = $false
                 })
             break
@@ -259,10 +197,10 @@ try {
 
         'NotFound' {
             Write-Information "Salesforce-SCIM account: [$($actionContext.References.Account)] could not be found, indicating that it may have been deleted"
-            $outputContext.Success = $false
+            $outputContext.Success = $true
             $outputContext.AuditLogs.Add([PSCustomObject]@{
                     Message = "Salesforce-SCIM account: [$($actionContext.References.Account)] could not be found, indicating that it may have been deleted"
-                    IsError = $true
+                    IsError = $false
                 })
             break
         }
@@ -274,11 +212,11 @@ catch {
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
         $errorObj = Resolve-SalesforceError -ErrorObject $ex
-        $auditLogMessage = "Could not grant Salesforce-SCIM permission. Error: $($errorObj.FriendlyMessage)"
+        $auditLogMessage = "Could not revoke Salesforce-SCIM permission. Error: $($errorObj.FriendlyMessage)"
         Write-Warning "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
     }
     else {
-        $auditLogMessage = "Could not grant Salesforce-SCIM permission. Error: $($_.Exception.Message)"
+        $auditLogMessage = "Could not revoke Salesforce-SCIM permission. Error: $($_.Exception.Message)"
         Write-Warning "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
     }
     $outputContext.AuditLogs.Add([PSCustomObject]@{

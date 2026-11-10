@@ -200,31 +200,42 @@ try {
         }
     }
 
-    if ($null -ne $correlatedAccount) {
-        $action = 'GrantPermission'
+    $permissionReference = $actionContext.References.Permission.Reference
+    $permissionAssigned = $false
+    if ($null -ne $correlatedAccount -and $null -ne $correlatedAccount.entitlements) {
+        foreach ($entitlement in @($correlatedAccount.entitlements)) {
+            if ($entitlement.value -eq $permissionReference) {
+                $permissionAssigned = $true
+                break
+            }
+        }
+    }
+
+    if ($null -eq $correlatedAccount) {
+        $action = 'NotFound'
+    }
+    elseif ($permissionAssigned) {
+        $action = 'NoChanges'
     }
     else {
-        $action = 'NotFound'
+        $action = 'GrantPermission'
     }
 
     # Process
     switch ($action) {
         'GrantPermission' {
             if (-not($actionContext.DryRun -eq $true)) {
-                Write-Information "Granting Salesforce-SCIM permission: [$($actionContext.PermissionDisplayName)] - [$($actionContext.References.Permission.Reference)]"
+                Write-Information "Granting Salesforce-SCIM permission: [$($actionContext.PermissionDisplayName)] - [$permissionReference]"
                 [System.Collections.Generic.List[object]]$operations = @()
-                [System.Collections.Generic.List[object]]$entitlementList = @()
-                $entitlementList.Add(
-                    [PSCustomObject]@{
-                        value = $($actionContext.References.Permission.Reference)
-                    }
-                )
-
                 $operations.Add(
                     [PSCustomObject]@{
-                        op    = "Replace"
+                        op    = 'add'
                         value = [PSCustomObject]@{
-                            entitlements = $entitlementList
+                            entitlements = @(
+                                [PSCustomObject]@{
+                                    value = $permissionReference
+                                }
+                            )
                         }
                     }
                 )
@@ -252,6 +263,16 @@ try {
             $outputContext.Success = $true
             $outputContext.AuditLogs.Add([PSCustomObject]@{
                     Message = "Grant permission [$($actionContext.PermissionDisplayName)] was successful"
+                    IsError = $false
+                })
+            break
+        }
+
+        'NoChanges' {
+            Write-Information "Permission: [$($actionContext.PermissionDisplayName)] is already assigned to Salesforce-SCIM account: [$($actionContext.References.Account)]"
+            $outputContext.Success = $true
+            $outputContext.AuditLogs.Add([PSCustomObject]@{
+                    Message = "Skipped granting permission [$($actionContext.PermissionDisplayName)]. Reason: Permission is already assigned."
                     IsError = $false
                 })
             break
